@@ -14,6 +14,8 @@ const (
 	DisconnectSequence = "~."
 )
 
+var silentMode bool
+
 // Progress indicates transfer status
 type Progress struct {
 	remoteAddr net.Addr
@@ -94,7 +96,7 @@ func TransferPackets(con net.Conn) {
 }
 
 // StartServer starts UDP listener
-func StartServer(proto string, port string) {
+func StartServer(proto string, port string, silent bool) {
 	addr, err := net.ResolveUDPAddr(proto, port)
 	if err != nil {
 		log.Fatalln(err)
@@ -109,15 +111,19 @@ func StartServer(proto string, port string) {
 }
 
 // StartClient starts UDP connector
-func StartClient(proto string, host string, port string) {
+func StartClient(proto string, host string, port string, silent bool) error {
+	silentMode = silent
 	addr, err := net.ResolveUDPAddr(proto, host+port)
 	if err != nil {
-		log.Fatalln(err)
+		return err
 	}
 	con, err := net.DialUDP(proto, nil, addr)
 	if err != nil {
-		log.Fatalln(err)
+		return err
 	}
-	log.Println("Sending datagrams to", host+port)
+	if !silentMode {
+		log.Println("Sending datagrams to", host+port)
+	}
 	TransferPackets(con)
+	return nil
 }

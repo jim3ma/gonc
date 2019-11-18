@@ -4,13 +4,18 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/url"
 	"os"
+
+	"github.com/yaproxy/libyap/proxy"
 )
 
 // Progress indicates transfer status
 type Progress struct {
 	bytes uint64
 }
+
+var silentMode bool
 
 // TransferStreams launches two read-write goroutines and waits for signal from them
 func TransferStreams(con net.Conn) {
@@ -24,18 +29,21 @@ func TransferStreams(con net.Conn) {
 		}()
 		n, err := io.Copy(w, r)
 		if err != nil {
-			log.Printf("[%s]: ERROR: %s\n", con.RemoteAddr(), err)
+			if !silentMode {
+				log.Printf("[%s]: ERROR: %s\n", con.RemoteAddr(), err)
+			}
 		}
 		c <- Progress{bytes: uint64(n)}
 	}
 
 	go copy(con, os.Stdout)
 	go copy(os.Stdin, con)
-
-	p := <-c
-	log.Printf("[%s]: Connection has been closed by remote peer, %d bytes has been received\n", con.RemoteAddr(), p.bytes)
-	p = <-c
-	log.Printf("[%s]: Local peer has been stopped, %d bytes has been sent\n", con.RemoteAddr(), p.bytes)
+	p1 := <-c
+	p2 := <-c
+	if !silentMode {
+		log.Printf("[%s]: Connection has been closed by remote peer, %d bytes has been received\n", con.RemoteAddr(), p1.bytes)
+		log.Printf("[%s]: Local peer has been stopped, %d bytes has been sent\n", con.RemoteAddr(), p2.bytes)
+	}
 }
 
 // StartServer starts TCP listener
@@ -54,11 +62,29 @@ func StartServer(proto string, port string) {
 }
 
 // StartClient starts TCP connector
-func StartClient(proto string, host string, port string) {
-	con, err := net.Dial(proto, host+port)
-	if err != nil {
-		log.Fatalln(err)
+func StartClient(proto string, host string, port string, proxyURL string, silent bool) error {
+	var dial func(network, address string) (net.Conn, error)
+	if proxyURL != "" {
+		fixedURL, err := url.Parse(proxyURL)
+		if err != nil {
+			return err
+		}
+		dialer, err := proxy.FromURL(fixedURL, nil, nil)
+		if err != nil {
+			return err
+		}
+		dial = dialer.Dial
+	} else {
+		dial = net.Dial
 	}
-	log.Println("Connected to", host+port)
+	silentMode = silent
+	con, err := dial(proto, host+":"+port)
+	if err != nil {
+		return err
+	}
+	if !silentMode{
+		log.Println("Connected to", host+port)
+	}
 	TransferStreams(con)
+	return nil
 }
